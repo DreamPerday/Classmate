@@ -1,0 +1,23 @@
+def addClassmateMirrors = { repositories ->
+  repositories.maven { repo ->
+    repo.url = "http://127.0.0.1:4873/gradle-plugin"
+    repo.allowInsecureProtocol = true
+  }
+  repositories.maven { repo ->
+    repo.url = "http://127.0.0.1:4873/google"
+    repo.allowInsecureProtocol = true
+  }
+  repositories.maven { repo ->
+    repo.url = "http://127.0.0.1:4873/public"
+    repo.allowInsecureProtocol = true
+  }
+}
+
+settingsEvaluated { settings ->
+  addClassmateMirrors(settings.pluginManagement.repositories)
+}
+
+gradle.beforeProject { project ->
+  addClassmateMirrors(project.buildscript.repositories)
+  addClassmateMirrors(project.repositories)
+}

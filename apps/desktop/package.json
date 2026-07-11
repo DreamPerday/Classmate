@@ -1,0 +1,32 @@
+{
+  "name": "@classmate/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": { "dev": "electron-vite dev", "build": "electron-vite build", "bundle:service": "esbuild ../server/src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=resources-build/server/index.cjs", "dist:win": "npm run build && npm run bundle:service && electron-builder --win nsis", "preview": "electron-vite preview", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@classmate/shared": "0.1.0", "@tanstack/react-query": "^5.80.7", "lucide-react": "^0.515.0",
+    "react": "19.2.3", "react-dom": "19.2.3", "react-force-graph-2d": "^1.27.0", "react-markdown": "^10.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.10", "@types/node": "^22.15.32", "@types/react": "^19.1.8", "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2", "electron": "^36.4.0", "electron-builder": "^26.0.12", "electron-vite": "^3.1.0", "esbuild": "^0.25.12", "tailwindcss": "^4.1.10", "typescript": "^5.8.3", "vite": "^6.3.5", "vitest": "^3.2.4"
+  },
+  "build": {
+    "appId": "cn.classmate.agent",
+    "productName": "Classmate",
+    "directories": { "output": "../../release" },
+    "files": ["out/**/*", "package.json"],
+    "extraResources": [
+      { "from": "resources-build/server", "to": "server" },
+      { "from": "../server/src/shared/migrations", "to": "apps/server/src/shared/migrations", "filter": ["*.sql"] },
+      { "from": "build/icon.ico", "to": "icon.ico" },
+      { "from": "../../services/ai-worker", "to": "services/ai-worker", "filter": ["**/*"] },
+      { "from": "../../tools/audio-capture/bin/Release/net8.0-windows", "to": "tools/audio-capture/bin/Release/net8.0-windows", "filter": ["**/*"] },
+      { "from": "../../tools/report-export/bin/Release/net8.0", "to": "tools/report-export/bin/Release/net8.0", "filter": ["**/*"] }
+    ],
+    "win": { "icon": "build/icon.ico", "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
+  }
+}

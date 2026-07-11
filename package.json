@@ -1,0 +1,24 @@
+{
+  "name": "classmate-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "postinstall": "node scripts/patch-react-native-gradle.mjs",
+    "dev": "npm run dev -w @classmate/desktop",
+    "build": "npm run build -w @classmate/shared && npm run build -w @classmate/server && npm run build -w @classmate/desktop",
+    "test": "npm run test -w @classmate/server && npm run test -w @classmate/desktop",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "lint": "npm run lint -ws --if-present",
+    "db:migrate": "npm run db:migrate -w @classmate/server",
+    "demo:seed": "npm run demo:seed -w @classmate/server",
+    "audit": "npm run build && npm run test && npm run audit:artifacts -w @classmate/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "typescript": "^5.8.3"
+  },
+  "overrides": { "react": "19.2.3", "react-dom": "19.2.3" },
+  "engines": { "node": ">=20" }
+}

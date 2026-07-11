@@ -1,0 +1,2 @@
+import React from "react";import{createRoot}from"react-dom/client";import{QueryClient,QueryClientProvider}from"@tanstack/react-query";import{App}from"./ui/App";import{OverlayApp}from"./ui/OverlayApp";import"./ui/styles.css";
+const client=new QueryClient({defaultOptions:{queries:{retry:2,staleTime:3000},mutations:{retry:false}}}),overlay=new URLSearchParams(location.search).get("overlay")==="1";createRoot(document.getElementById("root")!).render(<React.StrictMode><QueryClientProvider client={client}>{overlay?<OverlayApp/>:<App/>}</QueryClientProvider></React.StrictMode>);

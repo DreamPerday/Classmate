@@ -1,0 +1,65 @@
+# === 敏感文件（绝不提交） ===
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# === 依赖 ===
+node_modules/
+
+# === 构建产物 ===
+dist/
+out/
+build/
+release/
+*.tsbuildinfo
+
+# === 运行时数据 ===
+data/
+output/
+tmp/
+
+# === 日志 ===
+*.log
+npm-debug.log*
+
+# === 桌面端打包输出 ===
+apps/desktop/release/
+apps/desktop/resources-build/
+
+# === 非桌面端目录（本仓库仅推送桌面版） ===
+apps/mobile/
+services/
+tools/
+
+# === Python ===
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# === .NET 构建产物 ===
+**/bin/
+**/obj/
+
+# === IDE 与编辑器 ===
+.trae/
+.vscode/
+.idea/
+.playwright-cli/
+*.swp
+*.swo
+*~
+
+# === 操作系统 ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === 临时与缓存 ===
+.cache/
+*.tmp
+
+# === 移动端计划文件（本仓库仅推送桌面版） ===
+PLAN.md
