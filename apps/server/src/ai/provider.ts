@@ -61,10 +61,11 @@ class OpenAiProvider implements AiProvider {
   readonly embeddingName:string;
   private readonly client: OpenAI;
   constructor(private readonly settings:AiRuntimeSettings) {
-    if (!config.ai.openaiApiKey || !settings.chatModel) throw new DependencyError("OPENAI_API_KEY 和聊天模型必须同时配置");
+    const apiKey=settings.apiKey;
+    if (!apiKey || !settings.chatModel) throw new DependencyError("API Key 和聊天模型必须同时配置");
     this.name=`openai:${settings.chatModel}`;
     this.embeddingName=settings.embeddingModel.startsWith("local:")?settings.embeddingModel:`openai:${settings.embeddingModel}`;
-    this.client = new OpenAI({ apiKey: config.ai.openaiApiKey, baseURL: settings.baseUrl });
+    this.client = new OpenAI({ apiKey, baseURL: settings.baseUrl });
   }
   async extract(input: string): Promise<SemanticBatch> {
     const raw=await this.chat(extractionSystem,input,.1,true);try{return parseBatch(raw);}catch(error){const repaired=await this.chat(extractionSystem,`原始带ID字幕：\n${input}\n\n上一次输出未通过校验：\n${raw}\n\n校验错误：\n${error instanceof Error?error.message:String(error)}\n\n请重新输出完整且严格符合Schema的JSON对象。`,0,true);return parseBatch(repaired);}
@@ -94,7 +95,7 @@ class OpenAiProvider implements AiProvider {
     const baseUrl=normalizeOpenAiBaseUrl(this.settings.baseUrl);
     const body:Record<string,unknown>={model:this.settings.chatModel,instructions:system,input:prompt,temperature};
     if(json)body.text={format:{type:"json_object"}};
-    let response:Response;try{response=await fetch(`${baseUrl}/responses`,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${config.ai.openaiApiKey}`},body:JSON.stringify(body),signal:AbortSignal.timeout(120_000)});}
+    let response:Response;try{response=await fetch(`${baseUrl}/responses`,{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${this.settings.apiKey}`},body:JSON.stringify(body),signal:AbortSignal.timeout(120_000)});}
     catch(error){throw new DependencyError(`上游 Responses API 请求失败: ${error instanceof Error?error.message:String(error)}`);}
     if(!response.ok){const text=await response.text().catch(()=>"");throw new DependencyError(`Responses API 返回 ${response.status}: ${text.slice(0,200)}`);}
     const data=await response.json() as any;
@@ -109,12 +110,13 @@ class ClaudeProvider implements AiProvider {
   readonly name:string;
   readonly embeddingName:string;
   constructor(private readonly settings:AiRuntimeSettings) {
-    if (!config.ai.openaiApiKey || !settings.chatModel) throw new DependencyError("API Key 和聊天模型必须同时配置");
+    const apiKey=settings.apiKey;
+    if (!apiKey || !settings.chatModel) throw new DependencyError("API Key 和聊天模型必须同时配置");
     this.name=`claude:${settings.chatModel}`;
     this.embeddingName=settings.embeddingModel.startsWith("local:")?settings.embeddingModel:`openai:${settings.embeddingModel}`;
   }
   private get baseUrl():string{return normalizeOpenAiBaseUrl(this.settings.baseUrl);}
-  private get headers():Record<string,string>{return{"content-type":"application/json","x-api-key":config.ai.openaiApiKey??"","anthropic-version":"2023-06-01"};}
+  private get headers():Record<string,string>{return{"content-type":"application/json","x-api-key":this.settings.apiKey??"","anthropic-version":"2023-06-01"};}
   private async callMessages(system:string,prompt:string,temperature:number,maxTokens=4096):Promise<string>{
     const body={model:this.settings.chatModel,max_tokens:maxTokens,system,messages:[{role:"user"as const,content:prompt}],temperature};
     let response:Response;try{response=await fetch(`${this.baseUrl}/messages`,{method:"POST",headers:this.headers,body:JSON.stringify(body),signal:AbortSignal.timeout(120_000)});}
@@ -130,7 +132,7 @@ class ClaudeProvider implements AiProvider {
   }
   async embed(texts: string[]): Promise<number[][]> {
     if(this.settings.embeddingModel.startsWith("local:"))return localEmbed(this.settings.embeddingModel.slice(6),texts);
-    const response=await fetch(`${this.baseUrl}/embeddings`,{method:"POST",headers:{...this.headers,"x-api-key":config.ai.openaiApiKey??""},body:JSON.stringify({model:this.settings.embeddingModel,input:texts}),signal:AbortSignal.timeout(60_000)}).catch(error=>{throw new DependencyError(`Claude/中转 Embedding 请求失败: ${error instanceof Error?error.message:String(error)}`);});
+    const response=await fetch(`${this.baseUrl}/embeddings`,{method:"POST",headers:{...this.headers,"x-api-key":this.settings.apiKey??""},body:JSON.stringify({model:this.settings.embeddingModel,input:texts}),signal:AbortSignal.timeout(60_000)}).catch(error=>{throw new DependencyError(`Claude/中转 Embedding 请求失败: ${error instanceof Error?error.message:String(error)}`);});
     if(!response.ok){const errorText=await response.text().catch(()=>"");throw new DependencyError(`Embedding 接口返回 ${response.status}: ${errorText.slice(0,200)}`);}
     const data=await response.json() as any;return(data.data??[]).map((item:{embedding?:number[]})=>item.embedding??[]);
   }

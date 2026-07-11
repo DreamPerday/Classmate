@@ -5,20 +5,24 @@ import { JobRepository } from "../jobs/job.repository.js";
 import { getAiProvider } from "./provider.js";
 import { AiSettingsRepository, modelKind, normalizeOpenAiBaseUrl, type AiRuntimeSettings, type AiSettingsInput, type UpstreamModel } from "./settings.repository.js";
 
+function sanitizeSettings(settings:AiRuntimeSettings):Omit<AiRuntimeSettings,"apiKey">{
+  const{apiKey,...rest}=settings;return rest;
+}
 export class AiSettingsService {
   private cache:{key:string;at:number;models:UpstreamModel[]}|null=null;
   constructor(private readonly repository:AiSettingsRepository,private readonly jobs:JobRepository){}
-  get():AiRuntimeSettings{return this.repository.get();}
-  save(input:AiSettingsInput):AiRuntimeSettings{const previous=this.repository.get();this.cache=null;const saved=this.repository.save(input);if(previous.embeddingModel!==saved.embeddingModel)this.reindex();return saved;}
+  get():Omit<AiRuntimeSettings,"apiKey">{return sanitizeSettings(this.repository.get());}
+  save(input:AiSettingsInput):Omit<AiRuntimeSettings,"apiKey">{const previous=this.repository.get();this.cache=null;const saved=this.repository.save(input);if(previous.embeddingModel!==saved.embeddingModel)this.reindex();return sanitizeSettings(saved);}
   reindex():{queued:boolean;model:string}{const model=this.repository.get().embeddingModel;this.jobs.enqueue("reindex_all",{model},fingerprint("reindex",model,new Date().toISOString()));return{queued:true,model};}
   async listModels(provider?:AiSettingsInput["provider"]):Promise<UpstreamModel[]>{
     const settings=this.repository.get(),selected=provider??settings.provider,baseUrl=selected==="openai"?normalizeOpenAiBaseUrl(settings.baseUrl):selected==="ollama"?config.ai.ollamaBaseUrl:"local",key=`${selected}:${baseUrl}:${settings.apiFormat??"openai-chat"}`;
     if(this.cache?.key===key&&Date.now()-this.cache.at<60_000)return this.cache.models;
     let models:UpstreamModel[];
     if(selected==="openai"){
-      if(!config.ai.openaiApiKey)throw new DependencyError("OPENAI_API_KEY 未配置");
+      const apiKey=settings.apiKey;
+      if(!apiKey)throw new DependencyError("API Key 未配置，请在设置中输入");
       const isClaude=settings.apiFormat==="claude";
-      const headers:Record<string,string>=isClaude?{"x-api-key":config.ai.openaiApiKey,"anthropic-version":"2023-06-01"}:{authorization:`Bearer ${config.ai.openaiApiKey}`};
+      const headers:Record<string,string>=isClaude?{"x-api-key":apiKey,"anthropic-version":"2023-06-01"}:{authorization:`Bearer ${apiKey}`};
       const response=await fetch(`${baseUrl}/models`,{headers,signal:AbortSignal.timeout(20_000)}).catch(error=>{throw new DependencyError(`无法连接上游模型接口: ${error instanceof Error?error.message:String(error)}`);});
       if(!response.ok)throw new DependencyError(`上游模型接口返回 HTTP ${response.status}`);
       const body=await response.json() as {data?:Array<{id?:string;owned_by?:string;created?:number}>};

@@ -238,6 +238,64 @@ npm run dist:win
 
 生成 NSIS 安装包到 `release/` 目录。
 
+#### 8. 创建桌面快捷方式
+
+**方法一：使用安装包自动创建**
+
+运行 NSIS 安装包时，勾选"创建桌面快捷方式"选项，安装程序会自动在桌面创建快捷方式。
+
+**方法二：手动创建快捷方式**
+
+1. 在项目根目录创建启动脚本 `start-classmate.bat`：
+
+   ```bat
+   @echo off
+   cd /d "%~dp0"
+   echo Starting Classmate...
+   npm run dev
+   pause
+   ```
+
+2. 右键点击 `start-classmate.bat`，选择"发送到" → "桌面快捷方式"
+
+3. 右键点击桌面上的快捷方式，选择"属性"，可以修改以下设置：
+   - **目标**：确保指向正确的 `start-classmate.bat` 路径
+   - **起始位置**：设置为项目根目录
+   - **运行方式**：选择"最小化"，避免终端窗口干扰课堂
+
+**方法三：使用 PowerShell 脚本（推荐）**
+
+项目已提供 `scripts/start-classmate.ps1` 脚本，可直接使用：
+
+```powershell
+# 创建快捷方式
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("$env:USERPROFILE\Desktop\Classmate.lnk")
+$Shortcut.TargetPath = "powershell.exe"
+$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PWD\scripts\start-classmate.ps1`""
+$Shortcut.WorkingDirectory = "$PWD"
+$Shortcut.IconLocation = "$PWD\apps\desktop\build\icon.ico"
+$Shortcut.Save()
+```
+
+**方法四：开发模式快捷启动**
+
+如果经常在开发模式下使用，可以创建以下批处理文件 `dev-start.bat`：
+
+```bat
+@echo off
+title Classmate Development
+cd /d "%~dp0"
+echo Installing dependencies if needed...
+if not exist node_modules (
+    npm install
+)
+echo Starting development server...
+npm run dev
+```
+
+> 💡 **提示**：打包后的应用安装完成后，会自动在桌面和开始菜单创建快捷方式，无需手动操作。
+
 ## 🎮 界面功能详解
 
 ### 主界面视图
@@ -297,6 +355,18 @@ npm run dist:win
 
 切换格式后保存即可生效，无需重启。连接地址也可在界面中直接编辑，保存后立即使用新地址获取模型列表和发起请求。
 
+### API Key 配置
+
+桌面版支持在设置界面直接配置 API Key：
+
+1. 在「设置 → 模型与连接」页面找到"API Key"输入框
+2. 输入您的中转 API 密钥（格式如 `sk-...`）
+3. 点击"保存"按钮，密钥将加密保存在本地数据库
+4. 密钥不会在界面上显示完整内容（使用密码输入框）
+5. 服务器 API 响应中不包含密钥，确保传输安全
+
+> 💡 **提示**：API Key 优先从数据库读取，如果数据库中未配置，则回退使用 `.env` 文件中的 `OPENAI_API_KEY`。
+
 ## 🏗️ 架构要点
 
 ### 服务生命周期
@@ -310,7 +380,7 @@ npm run dist:win
 - **渲染进程隔离**：渲染进程不访问 Node API、文件系统或进程
 - **受限 IPC**：仅通过 preload 脚本暴露有限的 IPC 通道
 - **本地 API**：渲染进程通过 HTTP 与本地服务通信
-- **密钥保护**：API Key 仅由本地服务读取，不在界面显示或保存
+- **密钥保护**：API Key 保存在本地数据库中，不在界面显示完整内容；服务器 API 响应中不包含密钥
 
 ### 数据不变量
 

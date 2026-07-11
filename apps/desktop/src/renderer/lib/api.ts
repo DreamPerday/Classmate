@@ -40,6 +40,7 @@ export type AiSettings = {
   embeddingModel: string;
   baseUrl: string;
   apiFormat: ApiFormat;
+  apiKey?: string;
   hasKey: boolean;
 };
 export type UpstreamModel = {
@@ -108,7 +109,7 @@ export const api = {
   aiModels: (provider: AiSettings["provider"]) =>
     request<UpstreamModel[]>(`/api/ai/models?provider=${provider}`),
   saveAiSettings: (
-    settings: Pick<AiSettings, "provider" | "chatModel" | "embeddingModel" | "baseUrl" | "apiFormat">,
+    settings: Pick<AiSettings, "provider" | "chatModel" | "embeddingModel" | "baseUrl" | "apiFormat" | "apiKey">,
   ) =>
     request<AiSettings>("/api/ai/settings", {
       method: "PATCH",

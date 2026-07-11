@@ -1526,8 +1526,15 @@ function SettingsView() {
     queryKey: ["ai-settings"],
     queryFn: api.aiSettings,
   });
-  const [form, setForm] =
-    useState<Pick<AiSettings, "provider" | "chatModel" | "embeddingModel" | "baseUrl" | "apiFormat">>();
+  type AiSettingsForm = {
+    provider: AiSettings["provider"];
+    chatModel: AiSettings["chatModel"];
+    embeddingModel: AiSettings["embeddingModel"];
+    baseUrl: AiSettings["baseUrl"];
+    apiFormat: AiSettings["apiFormat"];
+    apiKey: string;
+  };
+  const [form, setForm] = useState<AiSettingsForm>();
   useEffect(() => {
     if (settings.data && !form)
       setForm({
@@ -1536,6 +1543,7 @@ function SettingsView() {
         embeddingModel: settings.data.embeddingModel,
         baseUrl: settings.data.baseUrl,
         apiFormat: settings.data.apiFormat ?? "openai-chat",
+        apiKey: "",
       });
   }, [settings.data, form]);
   const models = useQuery({
@@ -1553,6 +1561,7 @@ function SettingsView() {
         embeddingModel: value.embeddingModel,
         baseUrl: value.baseUrl,
         apiFormat: value.apiFormat ?? "openai-chat",
+        apiKey: form!.apiKey,
       });
       await queryClient.invalidateQueries({ queryKey: ["ai-settings"] });
     },
@@ -1695,13 +1704,17 @@ function SettingsView() {
             ))}
           </div>
         </SettingRow>
-        <SettingRow title="密钥状态" detail="界面不读取、不显示也不保存密钥">
-          <div
-            className={`flex items-center gap-2 text-sm font-semibold ${settings.data?.hasKey ? "text-[#32705b]" : "text-[#a14e3b]"}`}
-          >
-            <ShieldCheck size={17} />
-            {settings.data?.hasKey ? "已在本地服务配置" : "尚未配置"}
-          </div>
+        <SettingRow
+          title="API Key"
+          detail="中转 API 密钥，仅保存在本地数据库，不会在界面显示完整内容"
+        >
+          <input
+            type="password"
+            value={form.apiKey}
+            onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+            placeholder="sk-..."
+            className="h-10 w-[360px] max-w-full rounded-[5px] border border-[#ccd3cb] bg-white px-3 font-mono text-xs text-[#252b26] focus:border-[#285f4e] focus:outline-none"
+          />
         </SettingRow>
       </section>
       {models.error && (

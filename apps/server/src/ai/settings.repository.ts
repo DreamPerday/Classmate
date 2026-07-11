@@ -10,10 +10,11 @@ export const AiSettingsInputSchema = z.object({
   chatModel: z.string().min(1).max(200),
   embeddingModel: z.string().min(1).max(200),
   baseUrl: z.string().min(1).max(500).optional(),
-  apiFormat: ApiFormatSchema.optional()
+  apiFormat: ApiFormatSchema.optional(),
+  apiKey: z.string().max(500).optional()
 });
 export type AiSettingsInput = z.infer<typeof AiSettingsInputSchema>;
-export type AiRuntimeSettings = AiSettingsInput & { baseUrl: string; hasKey: boolean };
+export type AiRuntimeSettings = AiSettingsInput & { baseUrl: string; hasKey: boolean; apiKey: string | undefined };
 export type UpstreamModel = { id: string; ownedBy: string | null; created: number | null; kind: "chat" | "embedding" | "unknown" };
 
 export function normalizeOpenAiBaseUrl(value: string): string {
@@ -29,13 +30,15 @@ export class AiSettingsRepository {
     const apiFormat=(saved["ai.apiFormat"]??config.ai.openaiApiFormat??"openai-chat") as ApiFormat;
     const defaultBaseUrl=provider==="ollama"?config.ai.ollamaBaseUrl:normalizeOpenAiBaseUrl(config.ai.openaiBaseUrl);
     const baseUrl=saved["ai.baseUrl"]??defaultBaseUrl;
+    const apiKey=saved["ai.apiKey"]??config.ai.openaiApiKey;
     return {
       provider,
       chatModel:saved["ai.chatModel"]??config.ai.openaiChatModel??config.ai.ollamaChatModel,
       embeddingModel:saved["ai.embeddingModel"]??(provider==="ollama"?config.ai.ollamaEmbedModel:config.ai.openaiEmbedModel),
       baseUrl,
       apiFormat,
-      hasKey:provider!=="openai"||Boolean(config.ai.openaiApiKey)
+      apiKey,
+      hasKey:provider!=="openai"||Boolean(apiKey)
     };
   }
   save(input:AiSettingsInput):AiRuntimeSettings {
@@ -43,6 +46,7 @@ export class AiSettingsRepository {
     const entries:Record<string,string>={"ai.provider":input.provider,"ai.chatModel":input.chatModel,"ai.embeddingModel":input.embeddingModel};
     if(input.baseUrl)entries["ai.baseUrl"]=input.baseUrl;
     if(input.apiFormat)entries["ai.apiFormat"]=input.apiFormat;
+    if(input.apiKey!==undefined)entries["ai.apiKey"]=input.apiKey;
     transaction(()=>{for(const[key,value]of Object.entries(entries))db.prepare("INSERT INTO app_settings(key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(key,value,now);});
     return this.get();
   }
