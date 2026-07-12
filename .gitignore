@@ -28,10 +28,27 @@ npm-debug.log*
 apps/desktop/release/
 apps/desktop/resources-build/
 
-# === 非桌面端目录（本仓库仅推送桌面版） ===
-apps/mobile/
+# === 非桌面端目录（仅推送桌面版与移动端） ===
 services/
 tools/
+
+# === 移动端构建产物与缓存 ===
+apps/mobile/.expo/
+apps/mobile/dist-web/
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/app/.cxx/
+apps/mobile/android/local.properties
+apps/mobile/**/*.tsbuildinfo
+apps/mobile/android/app/src/main/assets/index.android.bundle
+apps/mobile/android/app/src/main/res/raw/__node_modules_*
+
+# === 移动端验证脚本与产物（仅本地使用，不提交） ===
+apps/mobile/scripts/
+
+# === 移动端 IDE 配置 ===
+apps/mobile/.claude/
 
 # === Python ===
 __pycache__/

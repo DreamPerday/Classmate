@@ -1,0 +1,14 @@
+<resources>
+  <string name="app_name">Classmate</string>
+  <string name="capture_channel_name">Classmate 系统音频捕获</string>
+  <string name="capture_channel_description">在设备内捕获并识别允许录制的播放音频</string>
+  <string name="capture_notification_title">正在本地识别课堂音频</string>
+  <string name="capture_notification_starting">正在启动系统音频捕获</string>
+  <string name="capture_notification_stop">停止</string>
+  <string name="capture_overlay_open">返回 Classmate</string>
+  <string name="capture_overlay_stop">停止系统音频捕获</string>
+  <string name="capture_overlay_signal">音频信号指示</string>
+  <string name="capture_overlay_expand">展开字幕预览</string>
+  <string name="capture_overlay_preview">实时字幕预览</string>
+  <string name="capture_overlay_restore">点击恢复悬浮窗</string>
+</resources>

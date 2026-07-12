@@ -1,0 +1,12 @@
+export type AiProvider="openai"|"mock";
+export type ApiFormat="openai-chat"|"claude";
+export type MobileSettings={baseUrl:string;chatModel:string;embeddingModel:string;provider:AiProvider;apiFormat:ApiFormat;hasKey:boolean};
+export type Transcript={id:string;text:string;startMs:number;endMs:number;createdAt:string};
+export type ClassroomEvent={id:string;type:string;title:string;content:string;importance:number;transcriptId:string;createdAt:string};
+export type KnowledgeNode={id:string;name:string;definition:string|null;importance:number};
+export type ClassroomTask={id:string;title:string;detail:string;deadlineRaw:string|null;deadlineResolved:string|null;status:"open"|"done"|"dismissed";importance:number;confidence:number;needsReview:boolean;transcriptId:string};
+export type MobileDashboard={course:{id:string;name:string};session:{id:string;title:string;dayIndex:number};courses:{id:string;name:string}[];sessions:{id:string;title:string;dayIndex:number}[];transcripts:Transcript[];events:ClassroomEvent[];stats:{minutes:number;concepts:number;openTasks:number;days:number}};
+export type Analysis={topic:string|null;events:Array<{type:string;title:string;content:string;importance:number}>;concepts:Array<{name:string;definition:string;importance:number}>;tasks:Array<{title:string;detail:string;deadlineRaw:string|null;deadlineResolved:string|null;importance:number;confidence:number;needsReview:boolean}>};
+export type ReportTemplate="daily"|"weekly"|"course"|"practicum"|"custom";
+export type ReportScope={template:ReportTemplate;title:string;startDate:string;endDate:string};
+export type LearningReport={id:string;title:string;content:string;template:ReportTemplate;startDate:string;endDate:string;evidenceCount:number;createdAt:string};
