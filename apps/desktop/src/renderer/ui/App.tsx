@@ -1375,6 +1375,16 @@ function ReportsView({ data }: { data: Dashboard }) {
       queryClient.invalidateQueries({ queryKey: ["reports", courseId] }),
     onError: (error) => alert(errorMessage(error)),
   });
+  const deleteReportMut = useMutation({
+    mutationFn: (id: string) => api.deleteReport(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["reports", courseId] }),
+    onError: (error) => alert(errorMessage(error)),
+  });
+  function confirmDeleteReport(id: string, title: string) {
+    if (confirm(`确定删除报告「${title}」？此操作不可撤销。`))
+      deleteReportMut.mutate(id);
+  }
   const total = data.sessions.length,
     completed = data.stats.completedDays,
     progress = total ? Math.round((completed / total) * 100) : 0;
@@ -1490,7 +1500,7 @@ function ReportsView({ data }: { data: Dashboard }) {
                   </div>
                 </div>
                 {report.status === "completed" && courseId && (
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     <a
                       title="下载 Word 格式报告"
                       className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
@@ -1505,6 +1515,22 @@ function ReportsView({ data }: { data: Dashboard }) {
                     >
                       导出 PDF
                     </a>
+                    <a
+                      title="下载 Markdown 格式报告"
+                      className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
+                      href={api.reportDownload(courseId, report.id, "md")}
+                    >
+                      导出 MD
+                    </a>
+                    <button
+                      type="button"
+                      title="删除此报告"
+                      onClick={() => confirmDeleteReport(report.id, report.title)}
+                      disabled={deleteReportMut.isPending}
+                      className="grid h-7 w-7 place-items-center rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] text-[#9b4433] hover:bg-[#f6e4df] disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 )}
               </div>
@@ -1526,6 +1552,7 @@ function SettingsView() {
     queryKey: ["ai-settings"],
     queryFn: api.aiSettings,
   });
+  const dashboard = useQuery({ queryKey: ["dashboard"], queryFn: () => api.dashboard() });
   type AiSettingsForm = {
     provider: AiSettings["provider"];
     chatModel: AiSettings["chatModel"];
@@ -1772,7 +1799,336 @@ function SettingsView() {
           {test.isPending ? "测试中" : "保存并测试"}
         </button>
       </div>
+      <CourseTransferSection data={dashboard.data} />
     </div>
+  );
+}
+function CourseTransferSection({ data }: { data: Dashboard | undefined }) {
+  const queryClient = useQueryClient();
+  const [importPayload, setImportPayload] = useState<any>(null);
+  const [importMode, setImportMode] = useState<"new" | "merge">("new");
+  const [newCourseName, setNewCourseName] = useState("");
+  const [targetCourseId, setTargetCourseId] = useState("");
+  const [order, setOrder] = useState<number[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const exportMut = useMutation({
+    mutationFn: (courseId: string) => api.exportCourse(courseId),
+    onSuccess: (payload) => {
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${payload.course.name.replace(/[\\/:*?"<>|]/g, "-")}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    onError: (error) => alert(errorMessage(error)),
+  });
+
+  const importMut = useMutation({
+    mutationFn: () => {
+      if (!importPayload) throw new Error("没有可导入的课程");
+      const options = importMode === "merge"
+        ? { mode: "merge" as const, targetCourseId, sessionOrder: order }
+        : { mode: "new" as const, newCourseName: newCourseName.trim() || importPayload.course.name, sessionOrder: order };
+      return api.importCourse(importPayload, options);
+    },
+    onSuccess: () => {
+      alert("导入成功");
+      setImportPayload(null);
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (error) => alert(errorMessage(error)),
+  });
+
+  const deleteCourseMut = useMutation({
+    mutationFn: (id: string) => api.deleteCourse(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+    onError: (error) => alert(errorMessage(error)),
+  });
+
+  const deleteSessionMut = useMutation({
+    mutationFn: (id: string) => api.deleteSession(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+    onError: (error) => alert(errorMessage(error)),
+  });
+
+  function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(reader.result as string);
+        if (payload.format !== "classmate-course") throw new Error("invalid");
+        setImportPayload(payload);
+        setNewCourseName(payload.course.name);
+        setImportMode("new");
+        setTargetCourseId("");
+        setOrder(payload.sessions.map((_: any, i: number) => i));
+      } catch {
+        alert("文件不是有效的 Classmate 课程包");
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  }
+
+  function moveUp(index: number) {
+    setOrder((prev) => {
+      if (index <= 0) return prev;
+      const next = [...prev];
+      const tmp = next[index - 1]!;
+      next[index - 1] = next[index]!;
+      next[index] = tmp;
+      return next;
+    });
+  }
+  function moveDown(index: number) {
+    setOrder((prev) => {
+      if (index >= prev.length - 1) return prev;
+      const next = [...prev];
+      const tmp = next[index]!;
+      next[index] = next[index + 1]!;
+      next[index + 1] = tmp;
+      return next;
+    });
+  }
+
+  const courses = data?.courses ?? [];
+  const sessions = data?.sessions ?? [];
+
+  return (
+    <section className="mt-8 border-y border-[#dce0da] bg-white px-6 py-6">
+      <div className="mb-5 flex items-center gap-2 text-[#2f6754]">
+        <Layers3 size={19} />
+        <h2 className="text-xl font-semibold text-[#252b26]">课程移植与管理</h2>
+      </div>
+      <p className="mb-5 text-sm text-[#747c75]">
+        导出课程到文件以便备份或移植到其他设备；从文件导入并合并到现有课程，支持课次重排。也可在此删除课程或课次。
+      </p>
+
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <h3 className="mb-3 text-sm font-semibold">导出课程</h3>
+          {courses.length ? (
+            <div className="space-y-2">
+              {courses.map((course) => (
+                <div key={course.id} className="flex items-center justify-between gap-3 rounded-[5px] border border-[#e0e4de] px-3 py-2">
+                  <span className="truncate text-sm">{course.name}</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => exportMut.mutate(course.id)}
+                      disabled={exportMut.isPending}
+                      className="rounded-[5px] border border-[#cfd5ce] px-3 py-1 text-xs font-semibold hover:bg-[#f2f4f0] disabled:opacity-50"
+                    >
+                      导出
+                    </button>
+                    <button
+                      type="button"
+                      title="删除课程及其所有课次、字幕、事件、知识和任务"
+                      onClick={() => {
+                        if (confirm(`确定删除课程「${course.name}」及其所有课次、字幕、事件、知识和任务？此操作不可撤销。`))
+                          deleteCourseMut.mutate(course.id);
+                      }}
+                      disabled={deleteCourseMut.isPending}
+                      className="grid h-7 w-7 place-items-center rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] text-[#9b4433] hover:bg-[#f6e4df] disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[#858c86]">暂无课程可导出</p>
+          )}
+        </div>
+
+        <div>
+          <h3 className="mb-3 text-sm font-semibold">导入课程</h3>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleFile}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            className="flex h-10 items-center gap-2 rounded-[6px] border border-[#cfd5ce] bg-white px-4 text-sm font-semibold hover:bg-[#f2f4f0]"
+          >
+            <FileText size={16} />
+            选择课程文件
+          </button>
+        </div>
+      </div>
+
+      {sessions.length > 0 && (
+        <div className="mt-6">
+          <h3 className="mb-3 text-sm font-semibold">删除课次</h3>
+          <div className="flex flex-wrap gap-2">
+            {sessions.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                title={`删除 第 ${session.dayIndex} 课次 · ${session.title}`}
+                onClick={() => {
+                  if (confirm(`确定删除「第 ${session.dayIndex} 课次 · ${session.title}」及其字幕、事件和任务？`))
+                    deleteSessionMut.mutate(session.id);
+                }}
+                disabled={deleteSessionMut.isPending}
+                className="flex items-center gap-1.5 rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] px-3 py-1.5 text-xs font-medium text-[#9b4433] hover:bg-[#f6e4df] disabled:opacity-50"
+              >
+                <Trash2 size={12} />
+                第 {session.dayIndex} 课次
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {importPayload && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#1f2621]/30 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-[8px] border border-[#d8ddd6] bg-white p-6 shadow-2xl scrollbar"
+          >
+            <header className="mb-5 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">导入课程</h2>
+              <button
+                title="关闭"
+                onClick={() => setImportPayload(null)}
+                className="grid h-8 w-8 place-items-center rounded-[5px] hover:bg-[#eff1ed]"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <div className="mb-5 rounded-[5px] border border-[#e0e4de] bg-[#f6f8f4] p-4">
+              <div className="text-base font-semibold">{importPayload.course.name}</div>
+              <div className="mt-2 text-xs text-[#2f6754]">
+                {importPayload.sessions.length} 个课次 · {importPayload.knowledgeNodes.length} 个知识节点 · {importPayload.knowledgeEdges.length} 条关系
+              </div>
+              <div className="mt-1 text-xs text-[#858c86]">
+                共 {importPayload.sessions.reduce((s: number, x: any) => s + x.transcripts.length, 0)} 条字幕、{importPayload.sessions.reduce((s: number, x: any) => s + x.events.length, 0)} 个事件、{importPayload.sessions.reduce((s: number, x: any) => s + x.tasks.length, 0)} 个任务
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="mb-2 text-xs font-semibold">导入方式</div>
+              <div className="flex rounded-[6px] border border-[#cfd5ce] bg-[#f3f5f1] p-1">
+                <button
+                  onClick={() => setImportMode("new")}
+                  className={`h-8 flex-1 text-xs font-semibold ${importMode === "new" ? "rounded-[4px] bg-white text-[#285f4e] shadow-sm" : "text-[#6b736c]"}`}
+                >
+                  作为新课程
+                </button>
+                <button
+                  onClick={() => setImportMode("merge")}
+                  className={`h-8 flex-1 text-xs font-semibold ${importMode === "merge" ? "rounded-[4px] bg-white text-[#285f4e] shadow-sm" : "text-[#6b736c]"}`}
+                >
+                  合并到现有
+                </button>
+              </div>
+            </div>
+
+            {importMode === "new" ? (
+              <label className="mb-4 block">
+                <span className="mb-2 block text-xs font-semibold">新课程名称</span>
+                <input
+                  value={newCourseName}
+                  onChange={(e) => setNewCourseName(e.target.value)}
+                  className="h-10 w-full rounded-[5px] border border-[#ccd3cb] bg-white px-3 text-sm"
+                />
+              </label>
+            ) : (
+              <div className="mb-4">
+                <div className="mb-2 text-xs font-semibold">目标课程</div>
+                {courses.length === 0 ? (
+                  <p className="text-xs text-[#858c86]">没有可选的目标课程</p>
+                ) : (
+                  <div className="max-h-48 overflow-auto rounded-[5px] border border-[#ccd3cb] bg-white scrollbar">
+                    {courses.map((course) => (
+                      <button
+                        key={course.id}
+                        onClick={() => setTargetCourseId(course.id)}
+                        className={`flex w-full items-center gap-2 border-b border-[#e7eae4] px-3 py-2.5 text-sm last:border-0 ${targetCourseId === course.id ? "bg-[#edf3ee] font-semibold text-[#285f4e]" : "hover:bg-[#f3f5f1]"}`}
+                      >
+                        {targetCourseId === course.id ? "●" : "○"} {course.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mb-5">
+              <div className="mb-2 text-xs font-semibold">课次排序（可调整）</div>
+              <div className="rounded-[5px] border border-[#ccd3cb] bg-white">
+                {order.map((originalIdx, position) => {
+                  const session = importPayload.sessions[originalIdx];
+                  return (
+                    <div
+                      key={`order-${position}`}
+                      className="flex items-center gap-3 border-b border-[#e7eae4] px-3 py-2.5 last:border-0"
+                    >
+                      <span className="w-16 text-xs text-[#858c86]">第 {position + 1} 位</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{session.title}</div>
+                        <div className="text-xs text-[#858c86]">{session.transcripts.length} 字幕 · {session.events.length} 事件</div>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveUp(position)}
+                          disabled={position === 0}
+                          className="grid h-7 w-7 place-items-center rounded-[5px] border border-[#ccd3cb] hover:bg-[#f2f4f0] disabled:opacity-30"
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveDown(position)}
+                          disabled={position === order.length - 1}
+                          className="grid h-7 w-7 place-items-center rounded-[5px] border border-[#ccd3cb] hover:bg-[#f2f4f0] disabled:opacity-30"
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setImportPayload(null)}
+                disabled={importMut.isPending}
+                className="flex h-10 items-center rounded-[6px] border border-[#ccd3cb] px-4 text-sm font-semibold disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => importMut.mutate()}
+                disabled={importMut.isPending || (importMode === "merge" && !targetCourseId)}
+                className="flex h-10 items-center gap-2 rounded-[6px] bg-[#285f4e] px-4 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {importMut.isPending ? "导入中..." : "确认导入"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
   );
 }
 function SettingRow({

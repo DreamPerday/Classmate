@@ -23,11 +23,16 @@ import android.os.Process
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineStream
+import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
-import org.json.JSONObject
-import org.vosk.Model
-import org.vosk.Recognizer
 
 class PlaybackCaptureService : Service() {
   companion object {
@@ -35,6 +40,9 @@ class PlaybackCaptureService : Service() {
     private const val NOTIFICATION_ID = 4107
     private const val SAMPLE_RATE = 16_000
     private const val BYTES_PER_SAMPLE = 2
+    private const val SILENCE_THRESHOLD_SAMPLES = 8_000
+    private const val MAX_SEGMENT_SAMPLES = SAMPLE_RATE * 30
+    private const val SIGNAL_THRESHOLD = 96
   }
 
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -45,6 +53,7 @@ class PlaybackCaptureService : Service() {
   private var projection: MediaProjection? = null
   private var audioRecord: AudioRecord? = null
   private var overlay: CaptureOverlayController? = null
+  @Volatile private var recognizer: OfflineRecognizer? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -125,21 +134,41 @@ class PlaybackCaptureService : Service() {
   private fun runCapture(mediaProjection: MediaProjection, showOverlay: Boolean) {
     Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
     var failure: String? = null
-    var model: Model? = null
-    var recognizer: Recognizer? = null
     var record: AudioRecord? = null
     val startedAt = System.currentTimeMillis()
     var capturedBytes = 0L
-    var utteranceStartMs = 0L
     var lastPublishAt = 0L
     var heardAudio = false
-    var finalFlushed = false
+    val speechBuffer = ByteArrayOutputStream()
+    var inSpeech = false
+    var silenceSamples = 0
+    var segmentStartMs = 0L
+    var segmentSampleCount = 0
     try {
-      model = Model(LocalAsrModelManager.modelDirectory(this).absolutePath)
-      recognizer = Recognizer(model, SAMPLE_RATE.toFloat()).apply {
-        setWords(false)
-        setPartialWords(false)
-      }
+      val language = LocalAsrModelManager.getLanguage(this)
+      val bundled = LocalAsrModelManager.isBundled(this)
+      val modelDir = LocalAsrModelManager.modelDirectory(this)
+
+      fun modelPath(name: String): String =
+        if (bundled) "${LocalAsrModelManager.BUNDLED_ASSET_DIR}/$name"
+        else File(modelDir, name).absolutePath
+
+      val config = OfflineRecognizerConfig(
+        featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
+        modelConfig = OfflineModelConfig(
+          whisper = OfflineWhisperModelConfig(
+            encoder = modelPath("tiny-encoder.int8.onnx"),
+            decoder = modelPath("tiny-decoder.int8.onnx"),
+            language = language,
+            task = "transcribe",
+          ),
+          tokens = modelPath("tiny-tokens.txt"),
+          modelType = "whisper",
+          numThreads = 2,
+          debug = false,
+        ),
+      )
+      recognizer = if (bundled) OfflineRecognizer(assets, config) else OfflineRecognizer(config = config)
 
       val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
         .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
@@ -156,7 +185,7 @@ class PlaybackCaptureService : Service() {
         AudioFormat.CHANNEL_IN_MONO,
         AudioFormat.ENCODING_PCM_16BIT,
       )
-      val bufferSize = maxOf(if (minimum > 0) minimum * 2 else 0, 32 * 1024)
+      val bufferSize = maxOf(if (minimum > 0) minimum * 4 else 0, 160 * 1024)
       record = AudioRecord.Builder()
         .setAudioPlaybackCaptureConfig(captureConfig)
         .setAudioFormat(format)
@@ -180,16 +209,47 @@ class PlaybackCaptureService : Service() {
           continue
         }
         capturedBytes += count
-        if (!heardAudio && hasSignal(buffer, count)) heardAudio = true
-        if (recognizer.acceptWaveForm(buffer, count)) {
-          val endMs = durationMs(capturedBytes)
-          publishResult(recognizer.result, startedAt, utteranceStartMs, endMs)
-          utteranceStartMs = endMs
+        val hasSig = hasSignal(buffer, count)
+        if (!heardAudio && hasSig) heardAudio = true
+
+        if (!inSpeech) {
+          if (hasSig) {
+            inSpeech = true
+            speechBuffer.reset()
+            speechBuffer.write(buffer, 0, count)
+            silenceSamples = 0
+            segmentSampleCount = count / BYTES_PER_SAMPLE
+            segmentStartMs = durationMs(capturedBytes - count)
+          }
+        } else {
+          speechBuffer.write(buffer, 0, count)
+          segmentSampleCount += count / BYTES_PER_SAMPLE
+          if (hasSig) {
+            silenceSamples = 0
+          } else {
+            silenceSamples += count / BYTES_PER_SAMPLE
+          }
+
+          if (silenceSamples >= SILENCE_THRESHOLD_SAMPLES) {
+            val samples = bytesToShorts(speechBuffer.toByteArray())
+            recognizeSegment(samples, startedAt, segmentStartMs, durationMs(capturedBytes - silenceSamples * BYTES_PER_SAMPLE.toLong()))
+            speechBuffer.reset()
+            inSpeech = false
+            silenceSamples = 0
+            segmentSampleCount = 0
+          } else if (segmentSampleCount >= MAX_SEGMENT_SAMPLES) {
+            val samples = bytesToShorts(speechBuffer.toByteArray())
+            recognizeSegment(samples, startedAt, segmentStartMs, durationMs(segmentStartMs + segmentSampleCount * 1000L / SAMPLE_RATE))
+            speechBuffer.reset()
+            inSpeech = false
+            silenceSamples = 0
+            segmentSampleCount = 0
+          }
         }
 
         val now = System.currentTimeMillis()
         if (now - lastPublishAt >= 750L) {
-          val partial = JSONObject(recognizer.partialResult).optString("partial").trim()
+          val partial = if (inSpeech) "识别中…" else ""
           val phase = if (!heardAudio && now - startedAt >= 5_000L) "silent" else "capturing"
           CaptureStateStore.progress(this, phase, partial, capturedBytes)
           overlayController.updateProgress(partial, capturedBytes, heardAudio)
@@ -197,9 +257,10 @@ class PlaybackCaptureService : Service() {
         }
       }
 
-      val endMs = durationMs(capturedBytes)
-      publishResult(recognizer.finalResult, startedAt, utteranceStartMs, endMs)
-      finalFlushed = true
+      if (inSpeech && speechBuffer.size() > 0) {
+        val samples = bytesToShorts(speechBuffer.toByteArray())
+        recognizeSegment(samples, startedAt, segmentStartMs, durationMs(capturedBytes))
+      }
     } catch (error: SecurityException) {
       failure = "capture_not_permitted"
     } catch (error: Throwable) {
@@ -209,35 +270,43 @@ class PlaybackCaptureService : Service() {
         else -> "capture_runtime_failed"
       }
     } finally {
-      if (!finalFlushed && recognizer != null && capturedBytes > 0L) {
-        runCatching {
-          publishResult(recognizer.finalResult, startedAt, utteranceStartMs, durationMs(capturedBytes))
-        }
-      }
       runCatching { record?.stop() }
       runCatching { record?.release() }
-      runCatching { recognizer?.close() }
-      runCatching { model?.close() }
+      runCatching { recognizer?.release() }
       audioRecord = null
+      recognizer = null
       val finalFailure = if (requestedStop) null else failure
       mainHandler.post { finishCapture(finalFailure) }
     }
   }
 
-  private fun publishResult(raw: String, startedAt: Long, startMs: Long, endMs: Long) {
-    val text = runCatching { JSONObject(raw).optString("text").trim() }.getOrDefault("")
-    if (text.isEmpty()) return
-    val safeEnd = maxOf(endMs, startMs + 1L)
-    PendingSegmentStore.add(
-      this,
-      CaptureSegment(
-        id = "capture_${startedAt}_$safeEnd",
-        text = text,
-        startMs = startMs,
-        endMs = safeEnd,
-        createdAt = Instant.ofEpochMilli(startedAt + safeEnd).toString(),
-      ),
-    )
+  private fun recognizeSegment(samples: ShortArray, startedAt: Long, startMs: Long, endMs: Long) {
+    if (samples.isEmpty()) return
+    val rec = recognizer ?: return
+    var stream: OfflineStream? = null
+    try {
+      stream = rec.createStream()
+      val floats = FloatArray(samples.size) { samples[it] / 32768.0f }
+      stream.acceptWaveform(floats, SAMPLE_RATE)
+      rec.decode(stream)
+      val text = rec.getResult(stream).text.trim()
+      if (text.isEmpty()) return
+      val safeEnd = maxOf(endMs, startMs + 1L)
+      PendingSegmentStore.add(
+        this,
+        CaptureSegment(
+          id = "capture_${startedAt}_$safeEnd",
+          text = text,
+          startMs = startMs,
+          endMs = safeEnd,
+          createdAt = Instant.ofEpochMilli(startedAt + safeEnd).toString(),
+        ),
+      )
+    } catch (error: Throwable) {
+      // Skip segment on recognition error, continue capturing
+    } finally {
+      runCatching { stream?.release() }
+    }
   }
 
   private fun requestStop() {
@@ -273,10 +342,20 @@ class PlaybackCaptureService : Service() {
     var index = 0
     while (index + 1 < count) {
       val sample = ((buffer[index + 1].toInt() shl 8) or (buffer[index].toInt() and 0xff)).toShort().toInt()
-      if (kotlin.math.abs(sample) >= 96) return true
+      if (kotlin.math.abs(sample) >= SIGNAL_THRESHOLD) return true
       index += 2
     }
     return false
+  }
+
+  private fun bytesToShorts(bytes: ByteArray): ShortArray {
+    val shorts = ShortArray(bytes.size / 2)
+    var i = 0
+    while (i + 1 < bytes.size) {
+      shorts[i / 2] = ((bytes[i + 1].toInt() shl 8) or (bytes[i].toInt() and 0xff)).toShort()
+      i += 2
+    }
+    return shorts
   }
 
   private fun createNotificationChannel() {

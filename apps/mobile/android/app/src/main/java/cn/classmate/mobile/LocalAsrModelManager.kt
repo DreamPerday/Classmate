@@ -1,35 +1,74 @@
 package cn.classmate.mobile
 
 import android.content.Context
+import android.content.res.AssetManager
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.zip.ZipInputStream
 
 object LocalAsrModelManager {
-  const val MODEL_NAME = "vosk-model-small-cn-0.22"
-  const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
-  const val EXPECTED_SIZE = 43_898_754L
-  const val EXPECTED_SHA256 = "3af8b0e7e0f835ae9d414ce5df580237a3cfb08d586c9fbbb0f7ff29ad5b14ba"
+  const val MODEL_NAME = "sherpa-onnx-whisper-tiny"
+  const val EXPECTED_SIZE = 102_000_000L
+  const val BUNDLED_ASSET_DIR = "sherpa-onnx-whisper-tiny"
+
+  private const val HF_BASE = "https://hf-mirror.com/csukuangfj/sherpa-onnx-whisper-tiny/resolve/main"
+  private const val PREFS_NAME = "classmate_prefs"
+  private const val KEY_ASR_LANGUAGE = "asr_language"
+  const val DEFAULT_LANGUAGE = "zh"
+
+  private data class ModelFile(val name: String, val url: String, val minSize: Long)
+
+  private val MODEL_FILES = listOf(
+    ModelFile("tiny-encoder.int8.onnx", "$HF_BASE/tiny-encoder.int8.onnx", 9_000_000L),
+    ModelFile("tiny-decoder.int8.onnx", "$HF_BASE/tiny-decoder.int8.onnx", 80_000_000L),
+    ModelFile("tiny-tokens.txt", "$HF_BASE/tiny-tokens.txt", 1_000L),
+  )
 
   private val downloading = AtomicBoolean(false)
 
   fun modelDirectory(context: Context): File = File(File(context.filesDir, "models"), MODEL_NAME)
 
+  fun isBundled(context: Context): Boolean {
+    val am = context.assets
+    return MODEL_FILES.all { file ->
+      runCatching { am.open("$BUNDLED_ASSET_DIR/${file.name}").use { it.available() > 0 } }.getOrDefault(false)
+    }
+  }
+
   fun isReady(context: Context): Boolean {
+    if (isBundled(context)) return true
     val root = modelDirectory(context)
-    return File(root, "am/final.mdl").isFile && File(root, "conf/model.conf").isFile
+    return MODEL_FILES.all { file ->
+      val f = File(root, file.name)
+      f.isFile && f.length() >= file.minSize
+    }
   }
 
   fun isDownloading(): Boolean = downloading.get()
 
+  fun getLanguage(context: Context): String {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    return prefs.getString(KEY_ASR_LANGUAGE, DEFAULT_LANGUAGE) ?: DEFAULT_LANGUAGE
+  }
+
+  fun setLanguage(context: Context, language: String) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putString(KEY_ASR_LANGUAGE, language)
+      .apply()
+  }
+
+  fun assetPaths(): List<String> = MODEL_FILES.map { "$BUNDLED_ASSET_DIR/${it.name}" }
+
   fun download(context: Context, progress: (String, Long, Long) -> Unit) {
+    if (isBundled(context)) {
+      progress("ready", EXPECTED_SIZE, EXPECTED_SIZE)
+      return
+    }
     if (!downloading.compareAndSet(false, true)) throw IllegalStateException("model_download_in_progress")
     try {
       if (isReady(context)) {
@@ -37,39 +76,36 @@ object LocalAsrModelManager {
         return
       }
 
-      val modelsRoot = File(context.filesDir, "models").apply { mkdirs() }
-      val archive = File(modelsRoot, "$MODEL_NAME.zip.download")
-      if (archive.exists()) archive.delete()
-      downloadArchive(archive, progress)
+      val root = modelDirectory(context)
+      root.mkdirs()
 
-      progress("verifying", archive.length(), EXPECTED_SIZE)
-      if (archive.length() != EXPECTED_SIZE) throw IllegalStateException("model_size_mismatch")
-      if (!sha256(archive).equals(EXPECTED_SHA256, ignoreCase = true)) {
-        throw IllegalStateException("model_checksum_mismatch")
+      val totalEstimated = EXPECTED_SIZE
+      var downloadedAccumulated = 0L
+
+      for (modelFile in MODEL_FILES) {
+        val target = File(root, modelFile.name)
+        if (target.isFile && target.length() >= modelFile.minSize) {
+          downloadedAccumulated += target.length()
+          progress("downloading", downloadedAccumulated, totalEstimated)
+          continue
+        }
+
+        val fileStartOffset = downloadedAccumulated
+        downloadFile(modelFile.url, target) { fileDownloaded ->
+          progress("downloading", fileStartOffset + fileDownloaded, totalEstimated)
+        }
+
+        if (target.length() < modelFile.minSize) {
+          throw IllegalStateException("model_file_too_small_${modelFile.name}_${target.length()}_need_${modelFile.minSize}")
+        }
+
+        downloadedAccumulated += target.length()
       }
 
-      val unpackRoot = File(modelsRoot, ".$MODEL_NAME.unpack")
-      if (unpackRoot.exists()) unpackRoot.deleteRecursively()
-      unpackRoot.mkdirs()
-      progress("unpacking", EXPECTED_SIZE, EXPECTED_SIZE)
-      unzip(archive, unpackRoot)
-
-      val unpackedModel = File(unpackRoot, MODEL_NAME)
-      if (!File(unpackedModel, "am/final.mdl").isFile || !File(unpackedModel, "conf/model.conf").isFile) {
-        throw IllegalStateException("model_layout_invalid")
-      }
-
-      val destination = modelDirectory(context)
-      if (destination.exists()) destination.deleteRecursively()
-      if (!unpackedModel.renameTo(destination)) {
-        unpackedModel.copyRecursively(destination, overwrite = true)
-      }
-      unpackRoot.deleteRecursively()
-      archive.delete()
+      progress("verifying", EXPECTED_SIZE, EXPECTED_SIZE)
+      if (!isReady(context)) throw IllegalStateException("model_verification_failed")
       progress("ready", EXPECTED_SIZE, EXPECTED_SIZE)
     } catch (error: Throwable) {
-      val partial = File(File(context.filesDir, "models"), "$MODEL_NAME.zip.download")
-      if (partial.exists()) partial.delete()
       throw error
     } finally {
       downloading.set(false)
@@ -77,15 +113,16 @@ object LocalAsrModelManager {
   }
 
   fun delete(context: Context) {
+    if (isBundled(context)) return
     if (downloading.get()) throw IllegalStateException("model_download_in_progress")
     val model = modelDirectory(context)
     if (model.exists()) model.deleteRecursively()
   }
 
-  private fun downloadArchive(target: File, progress: (String, Long, Long) -> Unit) {
-    val connection = (URL(MODEL_URL).openConnection() as HttpURLConnection).apply {
-      connectTimeout = 20_000
-      readTimeout = 60_000
+  private fun downloadFile(url: String, target: File, progress: (Long) -> Unit) {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+      connectTimeout = 30_000
+      readTimeout = 120_000
       instanceFollowRedirects = true
       requestMethod = "GET"
       setRequestProperty("Accept-Encoding", "identity")
@@ -94,7 +131,6 @@ object LocalAsrModelManager {
       val status = connection.responseCode
       if (status !in 200..299) throw IllegalStateException("model_download_http_$status")
       val total = connection.contentLengthLong
-      if (total > 0 && total != EXPECTED_SIZE) throw IllegalStateException("model_remote_size_mismatch")
       connection.inputStream.use { input ->
         BufferedInputStream(input).use { bufferedInput ->
           BufferedOutputStream(FileOutputStream(target)).use { output ->
@@ -106,8 +142,8 @@ object LocalAsrModelManager {
               if (count < 0) break
               output.write(buffer, 0, count)
               downloaded += count
-              if (downloaded - lastPublished >= 512 * 1024 || downloaded == EXPECTED_SIZE) {
-                progress("downloading", downloaded, EXPECTED_SIZE)
+              if (downloaded - lastPublished >= 512 * 1024 || (total > 0 && downloaded == total)) {
+                progress(downloaded)
                 lastPublished = downloaded
               }
             }
@@ -116,37 +152,6 @@ object LocalAsrModelManager {
       }
     } finally {
       connection.disconnect()
-    }
-  }
-
-  private fun sha256(file: File): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    FileInputStream(file).use { input ->
-      val buffer = ByteArray(64 * 1024)
-      while (true) {
-        val count = input.read(buffer)
-        if (count < 0) break
-        digest.update(buffer, 0, count)
-      }
-    }
-    return digest.digest().joinToString("") { "%02x".format(it) }
-  }
-
-  private fun unzip(archive: File, destination: File) {
-    val rootPath = destination.canonicalPath + File.separator
-    ZipInputStream(BufferedInputStream(FileInputStream(archive))).use { zip ->
-      while (true) {
-        val entry = zip.nextEntry ?: break
-        val target = File(destination, entry.name)
-        if (!target.canonicalPath.startsWith(rootPath)) throw IllegalStateException("model_zip_path_invalid")
-        if (entry.isDirectory) {
-          target.mkdirs()
-        } else {
-          target.parentFile?.mkdirs()
-          BufferedOutputStream(FileOutputStream(target)).use { output -> zip.copyTo(output) }
-        }
-        zip.closeEntry()
-      }
     }
   }
 }

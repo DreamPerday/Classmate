@@ -6,8 +6,8 @@ ext {
 
 buildscript {
   repositories {
-    maven { url 'http://127.0.0.1:4873/google'; allowInsecureProtocol = true }
-    maven { url 'http://127.0.0.1:4873/public'; allowInsecureProtocol = true }
+    // maven { url 'http://127.0.0.1:4873/google'; allowInsecureProtocol = true }
+    // maven { url 'http://127.0.0.1:4873/public'; allowInsecureProtocol = true }
     maven { url 'https://maven.aliyun.com/repository/google' }
     maven { url 'https://maven.aliyun.com/repository/public' }
     google()
@@ -22,8 +22,8 @@ buildscript {
 
 allprojects {
   repositories {
-    maven { url 'http://127.0.0.1:4873/google'; allowInsecureProtocol = true }
-    maven { url 'http://127.0.0.1:4873/public'; allowInsecureProtocol = true }
+    // maven { url 'http://127.0.0.1:4873/google'; allowInsecureProtocol = true }
+    // maven { url 'http://127.0.0.1:4873/public'; allowInsecureProtocol = true }
     maven { url 'https://maven.aliyun.com/repository/google' }
     maven { url 'https://maven.aliyun.com/repository/public' }
     google()

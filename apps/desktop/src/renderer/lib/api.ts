@@ -62,11 +62,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  deleteCourse: (id: string) =>
+    request<{ deleted: boolean }>(`/api/courses/${id}`, { method: "DELETE" }),
+  exportCourse: (id: string) =>
+    request<any>(`/api/courses/${id}/export`),
+  importCourse: (payload: any, options: any) =>
+    request<{ courseId: string; sessionCount: number }>(`/api/courses/import`, {
+      method: "POST",
+      body: JSON.stringify({ payload, options }),
+    }),
   createSession: (body: object) =>
     request<CourseSession>("/api/sessions", {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  deleteSession: (id: string) =>
+    request<{ deleted: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
   sessionStatus: (id: string, status: CourseSession["status"]) =>
     request<CourseSession>(`/api/sessions/${id}/status`, {
       method: "POST",
@@ -103,8 +114,10 @@ export const api = {
     }),
   reports: (courseId: string) =>
     request<any[]>(`/api/courses/${courseId}/reports`),
-  reportDownload: (courseId: string, id: string, format: "docx" | "pdf") =>
+  reportDownload: (courseId: string, id: string, format: "docx" | "pdf" | "md") =>
     `${base}/api/reports/${id}/download/${format}?courseId=${encodeURIComponent(courseId)}`,
+  deleteReport: (id: string) =>
+    request<{ deleted: boolean }>(`/api/reports/${id}`, { method: "DELETE" }),
   aiSettings: () => request<AiSettings>("/api/ai/settings"),
   aiModels: (provider: AiSettings["provider"]) =>
     request<UpstreamModel[]>(`/api/ai/models?provider=${provider}`),

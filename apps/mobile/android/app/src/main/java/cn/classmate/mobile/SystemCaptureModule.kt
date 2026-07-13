@@ -152,6 +152,17 @@ class SystemCaptureModule(private val context: ReactApplicationContext) : ReactC
   }
 
   @ReactMethod
+  fun setAsrLanguage(language: String, promise: Promise) {
+    LocalAsrModelManager.setLanguage(context, language)
+    promise.resolve(true)
+  }
+
+  @ReactMethod
+  fun getAsrLanguage(promise: Promise) {
+    promise.resolve(LocalAsrModelManager.getLanguage(context))
+  }
+
+  @ReactMethod
   fun addListener(eventName: String) = Unit
 
   @ReactMethod
@@ -167,9 +178,11 @@ class SystemCaptureModule(private val context: ReactApplicationContext) : ReactC
       putBoolean("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
       putDouble("apiLevel", Build.VERSION.SDK_INT.toDouble())
       putBoolean("modelReady", LocalAsrModelManager.isReady(context))
+      putBoolean("modelBundled", LocalAsrModelManager.isBundled(context))
       putBoolean("modelDownloading", LocalAsrModelManager.isDownloading())
       putString("modelName", LocalAsrModelManager.MODEL_NAME)
       putDouble("modelSize", LocalAsrModelManager.EXPECTED_SIZE.toDouble())
+      putString("asrLanguage", LocalAsrModelManager.getLanguage(context))
       putBoolean("overlayGranted", Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context))
       putBoolean("overlayVisible", snapshot.overlayVisible)
       putBoolean("active", snapshot.active)
