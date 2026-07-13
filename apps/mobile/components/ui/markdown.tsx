@@ -1,10 +1,12 @@
 import{StyleSheet,Text,View}from"react-native";
 import{colors}from"@/constants/theme";
 
-type MarkdownTextProps={content:string;style?:any};
+type MarkdownTextProps={content:string|undefined|null;style?:any};
 
 export function MarkdownText({content,style}:MarkdownTextProps){
-  const blocks=parseBlocks(content);
+  const safeContent=typeof content==="string"?content:"";
+  if(!safeContent.trim())return null;
+  const blocks=parseBlocks(safeContent);
   return <View style={[styles.container,style]}>
     {blocks.map((block,index)=>renderBlock(block,index))}
   </View>;
@@ -52,9 +54,10 @@ function renderBlock(block:Block,key:number){
     case"h2":return <Text key={key} style={styles.h2}>{renderInline(block.text)}</Text>;
     case"h3":return <Text key={key} style={styles.h3}>{renderInline(block.text)}</Text>;
     case"bullet":return <View key={key} style={styles.bulletGroup}>{block.items.map((item,i)=>
-      <View key={i} style={styles.bulletRow}><Text style={styles.bulletDot}>•</Text><Text style={styles.bulletText}>{renderInline(item)}</Text></View>
+      <View key={i} style={styles.bulletRow}><Text style={styles.bulletDot}>{"•"}</Text><Text style={styles.bulletText}>{renderInline(item)}</Text></View>
     )}</View>;
     case"paragraph":return <Text key={key} style={styles.paragraph}>{renderInline(block.text)}</Text>;
+    default:return null;
   }
 }
 

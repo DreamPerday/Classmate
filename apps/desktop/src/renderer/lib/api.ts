@@ -172,6 +172,8 @@ export const api = {
     request<SemanticEvent[]>(`/api/sessions/${sessionId}/events`),
   sessionTasks: (sessionId: string) =>
     request<ClassroomTask[]>(`/api/sessions/${sessionId}/tasks`),
+  courseSummaries: (courseId: string) =>
+    request<any[]>(`/api/courses/${courseId}/summaries`),
   nodeEvidence: (nodeId: string) =>
     request<
       Array<{

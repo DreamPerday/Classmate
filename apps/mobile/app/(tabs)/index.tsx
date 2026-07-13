@@ -161,7 +161,7 @@ export default function ClassroomScreen(){
         <Pressable style={styles.pillAdd} onPress={()=>newSession.mutate(data.course.id)}><Ionicons name="add" size={14} color={colors.muted}/><Text style={styles.pillAddText}>新课次</Text></Pressable>
       </ScrollView>
     </View>
-    <View style={styles.stats}>{[[data.stats.minutes.toFixed(0),"分钟"],[data.stats.concepts,"概念"],[data.stats.openTasks,"待办"],[data.stats.days,"天"]].map(([value,label])=><View key={label} style={styles.stat}><Text style={styles.statValue}>{value}</Text><Text style={styles.statLabel}>{label}</Text></View>)}</View>
+    <View style={styles.stats}>{[[data.stats.minutes.toFixed(0),"分钟"],[String(data.stats.concepts),"概念"],[String(data.stats.openTasks),"待办"],[String(data.stats.days),"天"]].map(([value,label])=><View key={label} style={styles.stat}><Text style={styles.statValue}>{value}</Text><Text style={styles.statLabel}>{label}</Text></View>)}</View>
 
     {!status.supported&&<ErrorNotice message="iOS 不允许捕获其他 App 的系统音频，可继续手工添加字幕。"/>}
     {status.supported&&!status.modelReady&&<View style={styles.localModel}>
@@ -199,7 +199,7 @@ export default function ClassroomScreen(){
     <Pressable accessibilityRole="button" style={styles.sectionHeader} onPress={()=>setExpandedEvents(v=>!v)}>
       <View style={styles.sectionLeft}><Ionicons name={expandedEvents?"chevron-down":"chevron-forward"} size={16} color={colors.muted}/><Text style={styles.sectionTitle}>课堂理解</Text></View>
     </Pressable>
-    {expandedEvents&&(data.events.length?data.events.slice(0,8).map(event=><View key={event.id} style={styles.event}><View style={styles.eventTop}><Text style={styles.eventType}>{event.type}</Text><Text style={styles.importance}>重要度 {event.importance}</Text></View><Text style={styles.eventTitle}>{event.title}</Text><Text style={styles.eventContent} numberOfLines={3}>{event.content}</Text></View>):<EmptyState title="等待语义事件" detail="重点、定义、作业和截止时间会保留字幕证据。" icon="sparkles-outline"/>)}
+    {expandedEvents&&(data.events.length?data.events.slice(0,8).map(event=><View key={event.id} style={styles.event}><View style={styles.eventTop}><Text style={styles.eventType}>{event.type}</Text><Text style={styles.importance}>{"重要度 "+String(event.importance)}</Text></View><Text style={styles.eventTitle}>{event.title}</Text><Text style={styles.eventContent} numberOfLines={3}>{event.content}</Text></View>):<EmptyState title="等待语义事件" detail="重点、定义、作业和截止时间会保留字幕证据。" icon="sparkles-outline"/>)}
   </ScrollView>;
 }
 

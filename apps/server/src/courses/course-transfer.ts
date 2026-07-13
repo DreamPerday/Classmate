@@ -105,6 +105,7 @@ export function importCourse(payload: CourseExportPayload, options: ImportOption
   for (const idx of order) { if (idx < 0 || idx >= payload.sessions.length) throw new Error("课次排序包含无效索引"); }
 
   let courseId: string;
+  let dayIndexOffset = 0;
   const knowledgeNodeIds = new Map<string, string>();
 
   transaction(() => {
@@ -115,6 +116,8 @@ export function importCourse(payload: CourseExportPayload, options: ImportOption
       courseId = target.id;
       const existing = db.prepare("SELECT id, normalized_name FROM knowledge_nodes WHERE course_id=?").all(courseId) as any[];
       for (const node of existing) knowledgeNodeIds.set(node.normalized_name, node.id);
+      const maxDay = db.prepare("SELECT MAX(day_index) as maxDay FROM sessions WHERE course_id=?").get(courseId) as any;
+      dayIndexOffset = maxDay?.maxDay ?? 0;
     } else {
       courseId = id("course");
       const name = (options.newCourseName || payload.course.name).trim() || "导入课程";
@@ -125,7 +128,7 @@ export function importCourse(payload: CourseExportPayload, options: ImportOption
       const originalIdx = order[position]!;
       const session = payload.sessions[originalIdx]!;
       const sessionId = id("session");
-      const dayIndex = position + 1;
+      const dayIndex = dayIndexOffset + position + 1;
       const title = session.title || `第 ${dayIndex} 天`;
       db.prepare("INSERT INTO sessions(id, course_id, title, day_index, status, started_at, ended_at, current_topic, created_at) VALUES (?, ?, ?, ?, 'planned', NULL, NULL, NULL, ?)").run(sessionId, courseId, title, dayIndex, session.createdAt || now);
 

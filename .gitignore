@@ -29,8 +29,8 @@ apps/desktop/release/
 apps/desktop/resources-build/
 
 # === 非桌面端目录（仅推送桌面版与移动端） ===
-services/
-tools/
+/services/
+/tools/
 
 # === 移动端构建产物与缓存 ===
 apps/mobile/.expo/

@@ -903,33 +903,238 @@ function AskBox({ courseId }: { courseId: string }) {
   );
 }
 function KnowledgeView({ data }: { data: Dashboard }) {
+  const courseId =
+    data.courses.find((c) => c.id === data.activeSession?.courseId)?.id ??
+    data.courses[0]?.id;
+  const [question, setQuestion] = useState("");
+  const [expandedTiers, setExpandedTiers] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const ask = useMutation({
+    mutationFn: () => api.ask(courseId!, question),
+    onError: () => {},
+  });
+  const nodes = data.graph.nodes;
+  const edges = data.graph.edges;
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const tiers = [
+    { title: "核心概念", nodes: nodes.filter((n) => n.importance >= 8), color: "#c95f3f" },
+    { title: "重要概念", nodes: nodes.filter((n) => n.importance >= 5 && n.importance < 8), color: "#2f765f" },
+    { title: "一般概念", nodes: nodes.filter((n) => n.importance < 5), color: "#858c86" },
+  ].filter((t) => t.nodes.length > 0);
+  const edgeGroups = new Map<string, { relation: string; targets: string[] }[]>();
+  for (const edge of edges) {
+    const sourceNode = nodeMap.get(edge.sourceId);
+    const targetNode = nodeMap.get(edge.targetId);
+    if (!sourceNode || !targetNode) continue;
+    const groups = edgeGroups.get(sourceNode.canonicalName) ?? [];
+    const existing = groups.find((g) => g.relation === edge.relation);
+    if (existing) existing.targets.push(targetNode.canonicalName);
+    else groups.push({ relation: edge.relation, targets: [targetNode.canonicalName] });
+    edgeGroups.set(sourceNode.canonicalName, groups);
+  }
   return (
-    <div className="grid h-full min-h-[calc(100dvh-54px)] grid-rows-[64px_minmax(0,1fr)]">
-      <header className="flex items-center justify-between border-b border-[#dfe3dc] bg-white px-6">
-        <div>
-          <h1 className="text-lg font-semibold">知识网络</h1>
+    <div className="grid h-full min-h-[calc(100dvh-54px)] grid-cols-[minmax(360px,42%)_minmax(0,1fr)]">
+      <div className="flex min-h-0 flex-col overflow-hidden border-r border-[#dce0da]">
+        <header className="border-b border-[#dfe3dc] bg-white px-5 py-3">
+          <h1 className="text-base font-semibold">知识网络</h1>
           <p className="text-xs text-[#777f78]">
-            {data.graph.nodes.length} 个概念 · {data.graph.edges.length} 条关系
+            {nodes.length} 个概念 · {edges.length} 条关系
           </p>
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto scrollbar px-5 py-4">
+          <div className="mb-6">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#2f6754]">
+              <Search size={15} />
+              课堂问答
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder="询问课堂中讲过的内容"
+                className="h-9 min-w-0 flex-1 rounded-[5px] border border-[#ccd3cb] bg-white px-3 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && question.trim() && !ask.isPending)
+                    ask.mutate();
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => ask.mutate()}
+                disabled={!question.trim() || ask.isPending || !courseId}
+                className="flex h-9 items-center gap-1.5 rounded-[5px] bg-[#285f4e] px-3 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                {ask.isPending ? "查询中..." : "查询"}
+              </button>
+            </div>
+            {ask.error && (
+              <div className="mt-2 rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] px-3 py-2 text-xs text-[#9b4433]">
+                {errorMessage(ask.error)}
+              </div>
+            )}
+            {ask.data && (
+              <div className="mt-3 rounded-[6px] border border-[#dfe3dc] bg-white p-4">
+                <div className="mb-2 text-xs font-semibold text-[#285f4e]">证据回答</div>
+                <div className="max-w-none text-sm leading-6 text-[#3a403b]">
+                  <Markdown>{ask.data.answer}</Markdown>
+                </div>
+                <div className="mt-3 text-[11px] text-[#858c86]">
+                  {ask.data.sources.length} 条本地证据
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="mb-6">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">知识节点</h2>
+              <span className="text-xs text-[#858c86]">
+                {nodes.length} 个 · {tiers.length} 个分类
+              </span>
+            </div>
+            {nodes.length ? (
+              <div className="space-y-3">
+                {tiers.map((tier) => {
+                  const expanded = expandedTiers[tier.title] ?? tier.nodes.length <= 5;
+                  const shown = expanded ? tier.nodes : tier.nodes.slice(0, 5);
+                  return (
+                    <div
+                      key={tier.title}
+                      className="overflow-hidden rounded-[6px] border border-[#dfe3dc] bg-white"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedTiers((prev) => ({ ...prev, [tier.title]: !expanded }))
+                        }
+                        className="flex w-full items-center gap-2 border-b border-[#eef0ec] px-3 py-2.5 text-left"
+                      >
+                        {expanded ? (
+                          <ChevronDown size={14} style={{ color: tier.color }} />
+                        ) : (
+                          <ChevronRight size={14} style={{ color: tier.color }} />
+                        )}
+                        <span className="flex-1 text-xs font-semibold" style={{ color: tier.color }}>
+                          {tier.title}
+                        </span>
+                        <span className="text-[11px] text-[#858c86]">{tier.nodes.length} 个</span>
+                      </button>
+                      {shown.map((node) => (
+                        <div
+                          key={node.id}
+                          className="flex items-start gap-3 border-b border-[#f0f2ee] px-3 py-2.5 last:border-0"
+                        >
+                          <div
+                            className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: tier.color }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-[#3a403b]">
+                              {node.canonicalName}
+                            </div>
+                            <div className="mt-0.5 text-xs leading-5 text-[#858c86]">
+                              {node.definition || "暂无稳定定义"}
+                            </div>
+                          </div>
+                          <span
+                            className="shrink-0 text-xs font-bold"
+                            style={{ color: tier.color }}
+                          >
+                            {node.importance}
+                          </span>
+                        </div>
+                      ))}
+                      {tier.nodes.length > 5 && !expanded && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedTiers((prev) => ({ ...prev, [tier.title]: true }))
+                          }
+                          className="w-full py-2 text-center text-[11px] font-semibold text-[#285f4e] hover:bg-[#f6f8f4]"
+                        >
+                          展开剩余 {tier.nodes.length - 5} 个
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty title="知识网络为空" detail="分析课堂字幕后，概念与关系会在这里归并。" />
+            )}
+          </div>
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">概念关系</h2>
+              <span className="text-xs text-[#858c86]">
+                {edges.length} 条 · {edgeGroups.size} 个源节点
+              </span>
+            </div>
+            {edgeGroups.size ? (
+              <div className="space-y-2">
+                {[...edgeGroups.entries()].map(([source, groups]) => {
+                  const expanded = expandedGroups[source] ?? false;
+                  const allTargets = groups.flatMap((g) => g.targets);
+                  return (
+                    <div
+                      key={source}
+                      className="overflow-hidden rounded-[6px] border border-[#dfe3dc] bg-white"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedGroups((prev) => ({ ...prev, [source]: !expanded }))
+                        }
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+                      >
+                        {expanded ? (
+                          <ChevronDown size={14} className="text-[#285f4e]" />
+                        ) : (
+                          <ChevronRight size={14} className="text-[#285f4e]" />
+                        )}
+                        <span className="flex-1 truncate text-sm font-medium">{source}</span>
+                        <span className="text-[11px] text-[#858c86]">
+                          {allTargets.length} 个关联
+                        </span>
+                      </button>
+                      {expanded ? (
+                        <div className="border-t border-[#eef0ec] px-3 py-2">
+                          {groups.flatMap((group, gi) =>
+                            group.targets.map((target, ti) => (
+                              <div key={`${gi}-${ti}`} className="flex items-center gap-2 py-1">
+                                <span className="text-xs font-medium">{source}</span>
+                                <div className="flex flex-1 items-center gap-1">
+                                  <div className="h-px flex-1 bg-[#d2d6cf]" />
+                                  <span className="text-[10px] text-[#858c86]">
+                                    {group.relation}
+                                  </span>
+                                  <div className="h-px flex-1 bg-[#d2d6cf]" />
+                                </div>
+                                <span className="text-xs font-medium">{target}</span>
+                              </div>
+                            )),
+                          )}
+                        </div>
+                      ) : (
+                        <div className="px-3 pb-2 text-[11px] text-[#858c86]">
+                          {allTargets.slice(0, 3).join("、")}
+                          {allTargets.length > 3 ? "…" : ""}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty title="暂无概念关系" detail="分析字幕后，概念间的关系会在这里汇总。" />
+            )}
+          </div>
         </div>
-        <div className="flex gap-4 text-xs text-[#687069]">
-          <span className="flex items-center gap-2">
-            <i className="h-2.5 w-2.5 rounded-full bg-[#2f765f]" />
-            概念
-          </span>
-          <span className="flex items-center gap-2">
-            <i className="h-2.5 w-2.5 rounded-full bg-[#c95f3f]" />
-            主题
-          </span>
-          <span className="flex items-center gap-2">
-            <i className="h-2.5 w-2.5 rounded-full bg-[#b7832f]" />
-            任务
-          </span>
-        </div>
-      </header>
-      <Suspense fallback={<Loading />}>
-        <GraphView nodes={data.graph.nodes} edges={data.graph.edges} />
-      </Suspense>
+      </div>
+      <div className="relative min-h-0">
+        <Suspense fallback={<Loading />}>
+          <GraphView nodes={nodes} edges={edges} />
+        </Suspense>
+      </div>
     </div>
   );
 }
@@ -1349,15 +1554,32 @@ function ReportsView({ data }: { data: Dashboard }) {
   const courseId =
     data.courses.find((c) => c.id === data.activeSession?.courseId)?.id ??
     data.courses[0]?.id;
-  const [scope, setScope] = useState<"all" | "range">("all");
+  type Template = "daily" | "weekly" | "course" | "practicum" | "custom";
+  const templates: { value: Template; label: string }[] = [
+    { value: "daily", label: "单日" },
+    { value: "weekly", label: "周报" },
+    { value: "course", label: "课程" },
+    { value: "practicum", label: "实训" },
+    { value: "custom", label: "自定义" },
+  ];
+  const defaultTitles: Record<Template, string> = {
+    daily: "单日学习记录",
+    weekly: "周学习报告",
+    course: "课程学习总结",
+    practicum: "实训学习报告",
+    custom: "自定义学习报告",
+  };
   const minDay = data.sessions.length
-      ? Math.min(...data.sessions.map((session) => session.dayIndex))
+      ? Math.min(...data.sessions.map((s) => s.dayIndex))
       : 1,
     maxDay = data.sessions.length
-      ? Math.max(...data.sessions.map((session) => session.dayIndex))
+      ? Math.max(...data.sessions.map((s) => s.dayIndex))
       : 1;
-  const [startDay, setStartDay] = useState(minDay),
-    [endDay, setEndDay] = useState(maxDay);
+  const [template, setTemplate] = useState<Template>("course");
+  const [reportTitle, setReportTitle] = useState(defaultTitles.course);
+  const [startDay, setStartDay] = useState(minDay);
+  const [endDay, setEndDay] = useState(maxDay);
+  const [expandedReport, setExpandedReport] = useState<string | undefined>();
   const queryClient = useQueryClient();
   const reports = useQuery({
     queryKey: ["reports", courseId],
@@ -1365,15 +1587,44 @@ function ReportsView({ data }: { data: Dashboard }) {
     enabled: Boolean(courseId),
     refetchInterval: 3000,
   });
+  const summaries = useQuery({
+    queryKey: ["course-summaries", courseId],
+    queryFn: () => api.courseSummaries(courseId!),
+    enabled: Boolean(courseId),
+  });
+  const summarySessionIds = new Set(
+    (summaries.data ?? []).map((s: any) => s.sessionId),
+  );
+  const inRangeSessions = data.sessions.filter(
+    (s) => s.dayIndex >= startDay && s.dayIndex <= endDay,
+  );
+  const missingSummaries = inRangeSessions.filter(
+    (s) => !summarySessionIds.has(s.id),
+  );
+  const readiness = {
+    ready: missingSummaries.length === 0,
+    missing: missingSummaries,
+  };
   const mutation = useMutation({
-    mutationFn: () =>
-      api.generateReport(
-        courseId!,
-        scope === "all" ? {} : { startDay, endDay },
-      ),
+    mutationFn: async () => {
+      if (!readiness.ready) {
+        const list = readiness.missing
+          .map((m) => `第${m.dayIndex}课次 ${m.title}`)
+          .join("、");
+        throw new Error(`以下课次尚未生成摘要，请先在课堂页生成：${list}`);
+      }
+      const options: { title: string; startDay?: number; endDay?: number } = {
+        title: reportTitle.trim() || defaultTitles[template],
+      };
+      if (template !== "course") {
+        options.startDay = startDay;
+        options.endDay = endDay;
+      }
+      return api.generateReport(courseId!, options);
+    },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["reports", courseId] }),
-    onError: (error) => alert(errorMessage(error)),
+    onError: (error) => alert(error instanceof Error ? error.message : errorMessage(error)),
   });
   const deleteReportMut = useMutation({
     mutationFn: (id: string) => api.deleteReport(id),
@@ -1385,6 +1636,29 @@ function ReportsView({ data }: { data: Dashboard }) {
     if (confirm(`确定删除报告「${title}」？此操作不可撤销。`))
       deleteReportMut.mutate(id);
   }
+  function chooseTemplate(t: Template) {
+    setTemplate(t);
+    setReportTitle(defaultTitles[t]);
+    if (t === "daily") {
+      setStartDay(maxDay);
+      setEndDay(maxDay);
+    } else if (t === "weekly") {
+      setStartDay(Math.max(1, maxDay - 6));
+      setEndDay(maxDay);
+    } else if (t === "practicum") {
+      setStartDay(Math.max(1, maxDay - 9));
+      setEndDay(maxDay);
+    } else {
+      setStartDay(minDay);
+      setEndDay(maxDay);
+    }
+  }
+  function tenDayPreset() {
+    setTemplate("practicum");
+    setReportTitle("10 天实训学习报告");
+    setStartDay(Math.max(1, maxDay - 9));
+    setEndDay(maxDay);
+  }
   const total = data.sessions.length,
     completed = data.stats.completedDays,
     progress = total ? Math.round((completed / total) * 100) : 0;
@@ -1393,63 +1667,55 @@ function ReportsView({ data }: { data: Dashboard }) {
       <header className="mb-7">
         <h1 className="text-xl font-semibold">学习报告</h1>
         <p className="mt-1 text-sm text-[#747c75]">
-          按全部课堂或指定课次范围生成可编辑、可追溯的综合报告。
+          按课程与课次范围引用课堂证据，十天仅作为快捷预设。
         </p>
       </header>
-      <section className="grid grid-cols-[minmax(0,1fr)_300px] gap-8 border-y border-[#dce0da] bg-white p-6">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#2f6754]">
-            <Layers3 size={17} />
-            综合学习报告
+      <section className="border-y border-[#dce0da] bg-white p-6">
+        <div className="mb-4">
+          <div className="mb-2 text-xs font-semibold uppercase text-[#808880]">
+            报告类型
           </div>
-          <h2 className="text-2xl font-semibold leading-tight">
-            把已有课堂证据整理成一份可审核的学习报告
-          </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-[#687069]">
-            报告覆盖学习目标、逐次内容、核心知识、任务与实践、反思和总结。只纳入真实存在的课堂，不补写课次编号空缺，也不推断任务已经完成。
-          </p>
-          <button
-            onClick={() => mutation.mutate()}
-            disabled={
-              !courseId ||
-              !total ||
-              mutation.isPending ||
-              (scope === "range" && startDay > endDay)
-            }
-            className="mt-5 flex h-10 items-center gap-2 rounded-[6px] bg-[#285f4e] px-4 text-sm font-semibold text-white disabled:opacity-40"
-          >
-            <FileText size={16} />
-            {mutation.isPending ? "正在生成..." : "生成综合报告"}
-          </button>
+          <div className="flex rounded-[6px] border border-[#cfd5ce] bg-[#f3f5f1] p-1">
+            {templates.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => chooseTemplate(item.value)}
+                className={`h-8 flex-1 text-xs font-semibold ${template === item.value ? "rounded-[4px] bg-white text-[#285f4e] shadow-sm" : "text-[#6b736c]"}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="border-l border-[#e0e4de] pl-6">
-          <div className="text-xs font-semibold uppercase text-[#808880]">
-            报告范围
-          </div>
-          <div className="mt-3 flex rounded-[6px] border border-[#cfd5ce] bg-[#f3f5f1] p-1">
-            <button
-              onClick={() => setScope("all")}
-              className={`h-8 flex-1 text-xs font-semibold ${scope === "all" ? "rounded-[4px] bg-white text-[#285f4e] shadow-sm" : "text-[#6b736c]"}`}
-            >
-              全部课堂
-            </button>
-            <button
-              onClick={() => setScope("range")}
-              className={`h-8 flex-1 text-xs font-semibold ${scope === "range" ? "rounded-[4px] bg-white text-[#285f4e] shadow-sm" : "text-[#6b736c]"}`}
-            >
-              自定义范围
-            </button>
-          </div>
-          {scope === "range" && (
-            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <button
+          type="button"
+          onClick={tenDayPreset}
+          className="mb-4 flex h-9 items-center gap-2 rounded-[5px] border border-[#c9d8d0] bg-[#f1f5ee] px-3 text-xs font-semibold text-[#2f6754] hover:bg-[#e8ece4]"
+        >
+          <CalendarClock size={15} />
+          使用 10 天实训预设
+        </button>
+        <div className="mb-4 grid grid-cols-[minmax(0,1fr)_300px] gap-8">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-[#59615b]">
+              报告标题
+            </label>
+            <input
+              value={reportTitle}
+              onChange={(e) => setReportTitle(e.target.value)}
+              className="h-9 w-full rounded-[5px] border border-[#ccd3cb] bg-white px-3 text-sm"
+            />
+            <div className="mt-3 flex items-center gap-2">
+              <label className="text-xs font-semibold text-[#59615b]">课次范围</label>
               <input
                 aria-label="起始课次"
                 type="number"
                 min={1}
                 max={365}
                 value={startDay}
-                onChange={(event) => setStartDay(Number(event.target.value))}
-                className="h-9 min-w-0 rounded-[5px] border border-[#ccd3cb] px-2 text-sm"
+                onChange={(e) => setStartDay(Number(e.target.value))}
+                className="h-8 w-20 rounded-[5px] border border-[#ccd3cb] px-2 text-sm"
               />
               <span className="text-xs text-[#858c86]">至</span>
               <input
@@ -1458,87 +1724,169 @@ function ReportsView({ data }: { data: Dashboard }) {
                 min={1}
                 max={365}
                 value={endDay}
-                onChange={(event) => setEndDay(Number(event.target.value))}
-                className="h-9 min-w-0 rounded-[5px] border border-[#ccd3cb] px-2 text-sm"
+                onChange={(e) => setEndDay(Number(e.target.value))}
+                className="h-8 w-20 rounded-[5px] border border-[#ccd3cb] px-2 text-sm"
               />
             </div>
-          )}
-          <div className="mt-5 text-3xl font-semibold text-[#2d6251]">
-            {completed}
-            <span className="text-base text-[#909790]"> / {total} 次完成</span>
+            {!readiness.ready && (
+              <div className="mt-3 rounded-[5px] border border-[#e6c9a8] bg-[#fbf3e8] px-3 py-2 text-xs text-[#8a6d3b]">
+                以下课次尚未生成摘要：{readiness.missing.map((m) => `第${m.dayIndex}课次`).join("、")}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => mutation.mutate()}
+              disabled={
+                !courseId ||
+                !total ||
+                mutation.isPending ||
+                startDay > endDay ||
+                !readiness.ready
+              }
+              className="mt-4 flex h-10 items-center gap-2 rounded-[6px] bg-[#285f4e] px-4 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              <Sparkles size={16} />
+              {mutation.isPending ? "正在生成..." : "生成范围报告"}
+            </button>
+            {mutation.error && (
+              <div className="mt-2 rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] px-3 py-2 text-xs text-[#9b4433]">
+                {mutation.error instanceof Error
+                  ? mutation.error.message
+                  : errorMessage(mutation.error)}
+              </div>
+            )}
           </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e2e6e0]">
-            <div
-              className="h-full bg-[#3d8169]"
-              style={{ width: `${Math.min(100, progress)}%` }}
-            />
+          <div className="border-l border-[#e0e4de] pl-6">
+            <div className="text-3xl font-semibold text-[#2d6251]">
+              {completed}
+              <span className="text-base text-[#909790]"> / {total} 次完成</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e2e6e0]">
+              <div
+                className="h-full bg-[#3d8169]"
+                style={{ width: `${Math.min(100, progress)}%` }}
+              />
+            </div>
+            <p className="mt-3 text-xs leading-5 text-[#7c847d]">
+              当前课程共记录 {total} 次课堂，可随时生成阶段报告。
+            </p>
           </div>
-          <p className="mt-3 text-xs leading-5 text-[#7c847d]">
-            当前课程共记录 {total} 次课堂，可随时生成阶段报告。
-          </p>
         </div>
       </section>
       <section className="mt-7">
         <h2 className="mb-3 text-sm font-semibold">报告历史</h2>
-        <div className="divide-y divide-[#dfe3dc] border-y border-[#dfe3dc] bg-white">
+        <div className="space-y-3">
           {reports.data?.length ? (
-            reports.data.map((report) => (
-              <div
-                key={report.id}
-                className="flex items-center justify-between gap-4 px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">
-                    {report.title}
-                  </div>
-                  <div className="mt-1 text-xs text-[#858c86]">
-                    {report.status === "completed"
-                      ? "导出完成"
-                      : report.status === "failed"
-                        ? "生成失败"
-                        : "后台处理中"}
-                  </div>
-                </div>
-                {report.status === "completed" && courseId && (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <a
-                      title="下载 Word 格式报告"
-                      className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
-                      href={api.reportDownload(courseId, report.id, "docx")}
-                    >
-                      导出 Word
-                    </a>
-                    <a
-                      title="下载 PDF 格式报告"
-                      className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
-                      href={api.reportDownload(courseId, report.id, "pdf")}
-                    >
-                      导出 PDF
-                    </a>
-                    <a
-                      title="下载 Markdown 格式报告"
-                      className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
-                      href={api.reportDownload(courseId, report.id, "md")}
-                    >
-                      导出 MD
-                    </a>
+            reports.data.map((report) => {
+              const open = expandedReport === report.id;
+              const charCount = report.contentMd
+                ? report.contentMd.replace(/\s/g, "").length
+                : 0;
+              const tooShort =
+                report.status === "completed" &&
+                charCount > 0 &&
+                charCount < 2000 &&
+                (report.scopeStartDay === null ||
+                  (report.scopeEndDay ?? 0) - (report.scopeStartDay ?? 0) >= 6);
+              return (
+                <div
+                  key={report.id}
+                  className="overflow-hidden rounded-[6px] border border-[#dfe3dc] bg-white"
+                >
+                  <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <button
                       type="button"
-                      title="删除此报告"
-                      onClick={() => confirmDeleteReport(report.id, report.title)}
-                      disabled={deleteReportMut.isPending}
-                      className="grid h-7 w-7 place-items-center rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] text-[#9b4433] hover:bg-[#f6e4df] disabled:opacity-50"
+                      onClick={() => setExpandedReport(open ? undefined : report.id)}
+                      className="min-w-0 flex-1 text-left"
                     >
-                      <Trash2 size={13} />
+                      <div className="truncate text-sm font-medium">
+                        {report.title}
+                      </div>
+                      <div className="mt-1 text-xs text-[#858c86]">
+                        {report.kind} ·{" "}
+                        {report.scopeStartDay !== null
+                          ? `第${report.scopeStartDay}-${report.scopeEndDay}课次`
+                          : "全部课堂"}
+                        {" · "}
+                        {new Date(report.createdAt).toLocaleDateString("zh-CN")}
+                        {report.status === "completed" && ` · ${charCount} 字符`}
+                      </div>
+                      <div className="mt-0.5 text-xs">
+                        {report.status === "completed" ? (
+                          <span className="text-[#3c8b6d]">已完成</span>
+                        ) : report.status === "failed" ? (
+                          <span className="text-[#a44e3d]">生成失败</span>
+                        ) : (
+                          <span className="text-[#858c86]">后台处理中...</span>
+                        )}
+                      </div>
                     </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {open ? (
+                        <ChevronUp size={16} className="text-[#858c86]" />
+                      ) : (
+                        <ChevronDown size={16} className="text-[#858c86]" />
+                      )}
+                      {report.status === "completed" && courseId && (
+                        <>
+                          <a
+                            title="下载 Word 格式报告"
+                            className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
+                            href={api.reportDownload(courseId, report.id, "docx")}
+                          >
+                            Word
+                          </a>
+                          <a
+                            title="下载 PDF 格式报告"
+                            className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
+                            href={api.reportDownload(courseId, report.id, "pdf")}
+                          >
+                            PDF
+                          </a>
+                          <a
+                            title="下载 Markdown 格式报告"
+                            className="rounded-[5px] border border-[#cfd5ce] px-3 py-1.5 text-xs font-semibold hover:bg-[#f2f4f0]"
+                            href={api.reportDownload(courseId, report.id, "md")}
+                          >
+                            MD
+                          </a>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        title="删除此报告"
+                        onClick={() => confirmDeleteReport(report.id, report.title)}
+                        disabled={deleteReportMut.isPending}
+                        className="grid h-7 w-7 place-items-center rounded-[5px] border border-[#e6b6ad] bg-[#fbf0ed] text-[#9b4433] hover:bg-[#f6e4df] disabled:opacity-50"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
-            ))
+                  {open && report.status === "completed" && report.contentMd && (
+                    <div className="border-t border-[#eef0ec] px-4 py-3">
+                      {tooShort && (
+                        <div className="mb-3 rounded-[5px] border border-[#e6c9a8] bg-[#fbf3e8] px-3 py-2 text-xs text-[#8a6d3b]">
+                          报告正文仅 {charCount} 个非空白字符，未达到综合报告 2000 字符质量门槛，建议重新生成。
+                        </div>
+                      )}
+                      <div className="max-w-none text-sm leading-6 text-[#3a403b]">
+                        <Markdown>{report.contentMd}</Markdown>
+                      </div>
+                    </div>
+                  )}
+                  {open && report.status === "pending" && (
+                    <div className="border-t border-[#eef0ec] px-4 py-3 text-sm text-[#858c86]">
+                      正在后台生成报告，请稍候...
+                    </div>
+                  )}
+                </div>
+              );
+            })
           ) : (
             <Empty
               title="暂无报告"
-              detail="生成后会在这里保留历史版本和导出文件。"
+              detail="选择范围后生成，报告会在这里保留历史版本和导出文件。"
             />
           )}
         </div>

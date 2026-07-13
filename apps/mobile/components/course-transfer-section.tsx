@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,9 +7,20 @@ import { LoadingState } from "@/components/ui/states";
 import { colors, spacing } from "@/constants/theme";
 import { listCourses } from "@/services/database";
 import { exportCourseToFile, importCourseFromPayload, pickCourseFile } from "@/services/course-transfer";
+import { consumeIncomingCourse, onIncomingCourse } from "@/services/incoming-course";
 import type { CourseExportPayload } from "@/services/database";
 
 type ImportMode = "new" | "merge";
+
+function applyPayload(payload: CourseExportPayload) {
+  return {
+    payload,
+    name: payload.course.name,
+    mode: "new" as ImportMode,
+    target: "",
+    order: payload.sessions.map((_, i) => i),
+  };
+}
 
 export function CourseTransferSection() {
   const queryClient = useQueryClient();
@@ -19,6 +30,27 @@ export function CourseTransferSection() {
   const [newCourseName, setNewCourseName] = useState("");
   const [targetCourseId, setTargetCourseId] = useState("");
   const [order, setOrder] = useState<number[]>([]);
+
+  useEffect(() => {
+    const incoming = consumeIncomingCourse();
+    if (incoming) {
+      const state = applyPayload(incoming);
+      setImportPayload(state.payload);
+      setNewCourseName(state.name);
+      setImportMode(state.mode);
+      setTargetCourseId(state.target);
+      setOrder(state.order);
+    }
+    return onIncomingCourse((payload) => {
+      if (!payload) return;
+      const state = applyPayload(payload);
+      setImportPayload(state.payload);
+      setNewCourseName(state.name);
+      setImportMode(state.mode);
+      setTargetCourseId(state.target);
+      setOrder(state.order);
+    });
+  }, []);
 
   const exportMut = useMutation({
     mutationFn: ({ courseId, name }: { courseId: string; name: string }) => exportCourseToFile(courseId, name),
